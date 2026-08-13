@@ -1,8 +1,8 @@
-fastapi
-uvicorn[standard]
-sqlalchemy
-psycopg[binary]
-python-dotenv
-pydantic
-pytest
-httpx2
+fastapi>=0.140.0
+uvicorn[standard]>=0.30.0
+sqlalchemy>=2.0.0
+psycopg[binary]>=3.2.0
+python-dotenv>=1.0.0
+pydantic>=2.0.0
+pytest>=7.0.0
+httpx2>=2.10.0      
