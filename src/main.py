@@ -7,8 +7,15 @@ from src.app.models import Channel as ChannelModel
 
 app = FastAPI()
 
-# Create database tables
-Base.metadata.create_all(bind=engine)
+
+@app.on_event("startup")
+def startup():
+    """Create database tables on startup"""
+    try:
+        Base.metadata.create_all(bind=engine)
+    except Exception as e:
+        print(f"Warning: Could not create tables on startup: {e}")
+
 
 # Register router
 app.include_router(Channel.router)
