@@ -55,6 +55,11 @@ jobs:
       if: always()
       run: |
         python -m pip install pytest-cov
+        python -m pytest test/ --cov=src --cov-report=xml
+
+  build:
+    needs: test
+    runs-on: ubuntu-latest
     if: github.event_name == 'push'
     
     steps:
