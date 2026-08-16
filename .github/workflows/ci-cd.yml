@@ -166,7 +166,7 @@ jobs:
       # --------------------------------------------------------
       - name: Wait for QA application
         run: |
-          QA_URL="https://testwebapp-qa-4bqh.onrender.com/Channel/channels"
+          QA_URL="https://testwebapp-qa.onrender.com"
 
           echo "Waiting for QA application..."
 
