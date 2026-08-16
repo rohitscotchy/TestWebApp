@@ -2,10 +2,14 @@ name: CI/CD Pipeline
 
 on:
   push:
-    branches: [main, develop]
+    branches:
+      - main
+      - develop
 
   pull_request:
-    branches: [main, develop]
+    branches:
+      - main
+      - develop
 
 
 jobs:
@@ -43,6 +47,7 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
+
       # --------------------------------------------------------
       # Setup Python
       # --------------------------------------------------------
@@ -53,6 +58,7 @@ jobs:
           cache: "pip"
           cache-dependency-path: requirement.txt
 
+
       # --------------------------------------------------------
       # Install dependencies
       # --------------------------------------------------------
@@ -61,6 +67,7 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install -r requirement.txt
           python -m pip install pytest-cov
+
 
       # --------------------------------------------------------
       # Run tests + coverage
@@ -77,8 +84,9 @@ jobs:
             --cov-report=term \
             --cov-report=xml
 
+
       # --------------------------------------------------------
-      # Upload coverage report as GitHub Actions artifact
+      # Upload coverage report
       # --------------------------------------------------------
       - name: Upload coverage report
         if: always()
@@ -96,8 +104,6 @@ jobs:
     needs: test
     runs-on: ubuntu-latest
 
-    # Build only for push events.
-    # Pull requests will only execute the test job.
     if: github.event_name == 'push'
 
     steps:
@@ -108,6 +114,7 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
+
       # --------------------------------------------------------
       # Build Docker image
       # --------------------------------------------------------
@@ -116,6 +123,7 @@ jobs:
           docker build \
             -t testwbapp:${{ github.sha }} \
             .
+
 
       # --------------------------------------------------------
       # Verify Docker image
@@ -127,29 +135,172 @@ jobs:
 
 
   # ============================================================
-  # CD - Deploy to Render
+  # CD - Deploy Application to QA
   # ============================================================
-  deploy:
-    name: Deploy to Render
+  deploy_qa:
+    name: Deploy to QA
     needs: build
     runs-on: ubuntu-latest
 
-    # Deploy ONLY when code is pushed to main
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
 
     steps:
 
       # --------------------------------------------------------
-      # Trigger Render deployment
+      # Trigger QA Render deployment
       # --------------------------------------------------------
-      - name: Deploy to Render
+      - name: Deploy to Render QA
         env:
-          RENDER_DEPLOY_HOOK: ${{ secrets.RENDER_DEPLOY_HOOK }}
+          RENDER_QA_DEPLOY_HOOK: ${{ secrets.RENDER_QA_DEPLOY_HOOK }}
 
         run: |
           curl --fail --show-error --silent \
             --request POST \
-            "$RENDER_DEPLOY_HOOK"
+            "$RENDER_QA_DEPLOY_HOOK"
+
+          echo "QA deployment triggered."
+
+
+      # --------------------------------------------------------
+      # Wait for QA application
+      # --------------------------------------------------------
+      - name: Wait for QA application
+        run: |
+          QA_URL="https://testwebapp-qa-4bqh.onrender.com/Channel/channels"
+
+          echo "Waiting for QA application..."
+
+          for i in {1..30}; do
+
+            echo "Attempt $i/30"
+
+            HTTP_STATUS=$(curl \
+              --silent \
+              --output /dev/null \
+              --write-out "%{http_code}" \
+              --max-time 15 \
+              "$QA_URL" || true)
+
+            echo "HTTP Status: $HTTP_STATUS"
+
+            if [ "$HTTP_STATUS" = "200" ]; then
+              echo "QA application is available."
+              exit 0
+            fi
+
+            sleep 10
+
+          done
+
+          echo "QA application did not become available."
+          exit 1
+
+
+  # ============================================================
+  # QA - Trigger Automation Repository
+  # ============================================================
+  qa_regression:
+    name: Run QA Regression
+    needs: deploy_qa
+    runs-on: ubuntu-latest
+
+    steps:
+
+      # --------------------------------------------------------
+      # Trigger TestWebApp-Automation workflow
+      # --------------------------------------------------------
+      - name: Trigger QA Automation
+        env:
+          QA_AUTOMATION_TOKEN: ${{ secrets.QA_AUTOMATION_TOKEN }}
+
+        run: |
+          curl --fail --show-error --silent \
+            --request POST \
+            --url "https://api.github.com/repos/YOUR_USERNAME/TestWebApp-Automation/actions/workflows/qa-regression.yml/dispatches" \
+            --header "Accept: application/vnd.github+json" \
+            --header "Authorization: Bearer $QA_AUTOMATION_TOKEN" \
+            --header "X-GitHub-Api-Version: 2022-11-28" \
+            --data '{"ref":"main"}'
+
+          echo "QA automation workflow triggered."
+
+
+      # --------------------------------------------------------
+      # Wait for QA automation workflow
+      # --------------------------------------------------------
+      - name: Wait for QA regression
+        env:
+          GH_TOKEN: ${{ secrets.QA_AUTOMATION_TOKEN }}
+
+        run: |
+
+          echo "Waiting for QA regression workflow..."
+
+          for i in {1..60}; do
+
+            echo "Checking QA regression status... attempt $i/60"
+
+            RUN_INFO=$(gh run list \
+              --repo YOUR_USERNAME/TestWebApp-Automation \
+              --workflow qa-regression.yml \
+              --branch main \
+              --limit 1 \
+              --json databaseId,status,conclusion \
+              --jq '.[0]')
+
+            echo "$RUN_INFO"
+
+            STATUS=$(echo "$RUN_INFO" | jq -r '.status')
+            CONCLUSION=$(echo "$RUN_INFO" | jq -r '.conclusion')
+
+            if [ "$STATUS" = "completed" ]; then
+
+              echo "QA regression completed."
+              echo "Conclusion: $CONCLUSION"
+
+              if [ "$CONCLUSION" = "success" ]; then
+                echo "QA REGRESSION PASSED."
+                exit 0
+              fi
+
+              echo "QA REGRESSION FAILED."
+              exit 1
+            fi
+
+            sleep 10
+
+          done
+
+          echo "Timeout waiting for QA regression."
+          exit 1
+
+
+  # ============================================================
+  # CD - Deploy Production
+  # ============================================================
+  deploy_production:
+    name: Deploy to Production
+    needs: qa_regression
+    runs-on: ubuntu-latest
+
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+
+    steps:
+
+      # --------------------------------------------------------
+      # Deploy to production ONLY after QA passes
+      # --------------------------------------------------------
+      - name: Deploy to Render Production
+        env:
+          RENDER_PROD_DEPLOY_HOOK: ${{ secrets.RENDER_PROD_DEPLOY_HOOK }}
+
+        run: |
+          curl --fail --show-error --silent \
+            --request POST \
+            "$RENDER_PROD_DEPLOY_HOOK"
+
+          echo "Production deployment triggered successfully."
+
 
       # --------------------------------------------------------
       # Deployment successful
@@ -157,7 +308,10 @@ jobs:
       - name: Deployment successful
         if: success()
         run: |
-          echo "Deployment to Render triggered successfully."
+          echo "=========================================="
+          echo " Production deployment successful"
+          echo "=========================================="
+
 
       # --------------------------------------------------------
       # Deployment failed
@@ -165,4 +319,6 @@ jobs:
       - name: Deployment failed
         if: failure()
         run: |
-          echo "Deployment failed. Check the Render dashboard."
+          echo "=========================================="
+          echo " Production deployment failed"
+          echo "=========================================="
