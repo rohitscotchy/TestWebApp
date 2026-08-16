@@ -216,7 +216,7 @@ jobs:
         run: |
           curl --fail --show-error --silent \
             --request POST \
-            --url "https://github.com/rohitscotchy/TestWebAppAutomation/actions/workflows/qa-regression.yml" \
+            --url "https://api.github.com/repos/rohitscotchy/TestWebAppAutomation/actions/workflows/qa-regression.yml/dispatches" \
             --header "Accept: application/vnd.github+json" \
             --header "Authorization: Bearer $QA_AUTOMATION_TOKEN" \
             --header "X-GitHub-Api-Version: 2022-11-28" \
