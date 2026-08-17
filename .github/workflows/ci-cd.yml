@@ -104,6 +104,7 @@ jobs:
     needs: test
     runs-on: ubuntu-latest
 
+    # Build only for push events
     if: github.event_name == 'push'
 
     steps:
@@ -154,6 +155,11 @@ jobs:
           RENDER_QA_DEPLOY_HOOK: ${{ secrets.RENDER_QA_DEPLOY_HOOK }}
 
         run: |
+          if [ -z "$RENDER_QA_DEPLOY_HOOK" ]; then
+            echo "RENDER_QA_DEPLOY_HOOK is not configured."
+            exit 1
+          fi
+
           curl --fail --show-error --silent \
             --request POST \
             "$RENDER_QA_DEPLOY_HOOK"
@@ -166,9 +172,11 @@ jobs:
       # --------------------------------------------------------
       - name: Wait for QA application
         run: |
-          QA_URL="https://testwebapp-qa.onrender.com"
+
+          QA_URL="https://testwebapp-qa.onrender.com/Channel/channels"
 
           echo "Waiting for QA application..."
+          echo "Health check URL: $QA_URL"
 
           for i in {1..30}; do
 
@@ -214,6 +222,12 @@ jobs:
           QA_AUTOMATION_TOKEN: ${{ secrets.QA_AUTOMATION_TOKEN }}
 
         run: |
+
+          if [ -z "$QA_AUTOMATION_TOKEN" ]; then
+            echo "QA_AUTOMATION_TOKEN is not configured."
+            exit 1
+          fi
+
           curl --fail --show-error --silent \
             --request POST \
             --url "https://api.github.com/repos/rohitscotchy/TestWebAppAutomation/actions/workflows/qa-regression.yml/dispatches" \
@@ -236,6 +250,9 @@ jobs:
 
           echo "Waiting for QA regression workflow..."
 
+          # Give GitHub a few seconds to register the workflow run
+          sleep 5
+
           for i in {1..60}; do
 
             echo "Checking QA regression status... attempt $i/60"
@@ -245,25 +262,37 @@ jobs:
               --workflow qa-regression.yml \
               --branch main \
               --limit 1 \
-              --json databaseId,status,conclusion \
+              --json databaseId,status,conclusion,createdAt \
               --jq '.[0]')
 
             echo "$RUN_INFO"
 
+            if [ -z "$RUN_INFO" ]; then
+              echo "QA regression workflow has not appeared yet."
+              sleep 10
+              continue
+            fi
+
             STATUS=$(echo "$RUN_INFO" | jq -r '.status')
             CONCLUSION=$(echo "$RUN_INFO" | jq -r '.conclusion')
+
+            echo "Status: $STATUS"
+            echo "Conclusion: $CONCLUSION"
 
             if [ "$STATUS" = "completed" ]; then
 
               echo "QA regression completed."
-              echo "Conclusion: $CONCLUSION"
 
               if [ "$CONCLUSION" = "success" ]; then
-                echo "QA REGRESSION PASSED."
+                echo "======================================"
+                echo "       QA REGRESSION PASSED"
+                echo "======================================"
                 exit 0
               fi
 
-              echo "QA REGRESSION FAILED."
+              echo "======================================"
+              echo "       QA REGRESSION FAILED"
+              echo "======================================"
               exit 1
             fi
 
@@ -283,18 +312,26 @@ jobs:
     needs: qa_regression
     runs-on: ubuntu-latest
 
+    # Production deployment ONLY happens from main
+    # AND only if QA regression succeeds.
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
 
     steps:
 
       # --------------------------------------------------------
-      # Deploy to production ONLY after QA passes
+      # Deploy to production
       # --------------------------------------------------------
       - name: Deploy to Render Production
         env:
           RENDER_PROD_DEPLOY_HOOK: ${{ secrets.RENDER_PROD_DEPLOY_HOOK }}
 
         run: |
+
+          if [ -z "$RENDER_PROD_DEPLOY_HOOK" ]; then
+            echo "RENDER_PROD_DEPLOY_HOOK is not configured."
+            exit 1
+          fi
+
           curl --fail --show-error --silent \
             --request POST \
             "$RENDER_PROD_DEPLOY_HOOK"
