@@ -35,7 +35,7 @@ client = TestClient(app)
 def auth_headers():
     return {
         "Authorization": "Bearer test-token",
-        "X-Client-Id": "test-client",
+        "Client-Id": "test-client",
     }
 
 
