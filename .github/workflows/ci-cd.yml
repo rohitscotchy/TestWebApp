@@ -171,6 +171,9 @@ jobs:
       # Wait for QA application
       # --------------------------------------------------------
       - name: Wait for QA application
+        env:
+          API_BEARER_TOKEN: ${{ secrets.API_BEARER_TOKEN }}
+          CLIENT_ID: ${{ secrets.CLIENT_ID }}
         run: |
 
           QA_URL="https://testwebapp-qa.onrender.com/Channel/channels"
@@ -187,6 +190,8 @@ jobs:
               --output /dev/null \
               --write-out "%{http_code}" \
               --max-time 15 \
+              -H "Authorization: Bearer $API_BEARER_TOKEN" \
+              -H "X-Client-Id: $CLIENT_ID" \
               "$QA_URL" || true)
 
             echo "HTTP Status: $HTTP_STATUS"

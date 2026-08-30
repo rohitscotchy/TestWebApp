@@ -6,7 +6,7 @@ from sqlalchemy.orm import sessionmaker, declarative_base
 
 load_dotenv()
 
-DATABASE_URL = os.getenv("DATABASE_URL")
+DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./app.db")
 
 # Ensure we're using psycopg3, not psycopg2
 if DATABASE_URL and not DATABASE_URL.startswith("sqlite"):

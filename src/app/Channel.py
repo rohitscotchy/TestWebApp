@@ -4,6 +4,7 @@ from pydantic import BaseModel
 
 from src.DBConnection import get_db
 from src.app.models import Channel
+from src.auth import require_api_auth
 
 
 router = APIRouter(
@@ -21,7 +22,8 @@ class ChannelRequest(BaseModel):
 @router.post("/channels")
 def create_channel(
     channel: ChannelRequest,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    _: dict = Depends(require_api_auth),
 ):
     new_channel = Channel(
         name=channel.name,
@@ -35,9 +37,11 @@ def create_channel(
 
     return new_channel
 
+
 @router.get("/channels")
 def get_channels(
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    _: dict = Depends(require_api_auth),
 ):
     channels = db.query(Channel).all()
 

@@ -32,6 +32,13 @@ app.dependency_overrides[get_db] = override_get_db
 client = TestClient(app)
 
 
+def auth_headers():
+    return {
+        "Authorization": "Bearer test-token",
+        "X-Client-Id": "test-client",
+    }
+
+
 @pytest.fixture(autouse=True)
 def setup_and_teardown():
     """Setup and teardown for each test"""
@@ -45,6 +52,15 @@ def setup_and_teardown():
 class TestChannelEndpoints:
     """Test cases for Channel endpoints"""
 
+    def test_requires_bearer_token_and_client_id(self):
+        """API should reject requests without the required auth headers."""
+        response = client.post("/Channel/channels", json={
+            "name": "NoAuth",
+            "device": "Device1",
+            "project": "Project1"
+        })
+        assert response.status_code == 401
+
     def test_create_channel_success(self):
         """Test successfully creating a channel"""
         channel_data = {
@@ -52,7 +68,7 @@ class TestChannelEndpoints:
             "device": "Device1",
             "project": "Project1"
         }
-        response = client.post("/Channel/channels", json=channel_data)
+        response = client.post("/Channel/channels", json=channel_data, headers=auth_headers())
         assert response.status_code == 200
         data = response.json()
         assert data["name"] == channel_data["name"]
@@ -67,7 +83,7 @@ class TestChannelEndpoints:
             "device": "TestDevice",
             "project": "TestProject"
         }
-        response = client.post("/Channel/channels", json=channel_data)
+        response = client.post("/Channel/channels", json=channel_data, headers=auth_headers())
         assert response.status_code == 200
         data = response.json()
         assert data["name"] == "TestChannel"
@@ -76,7 +92,7 @@ class TestChannelEndpoints:
 
     def test_get_channels_empty(self):
         """Test getting channels when database is empty"""
-        response = client.get("/Channel/channels")
+        response = client.get("/Channel/channels", headers=auth_headers())
         assert response.status_code == 200
         data = response.json()
         assert data == []
@@ -89,10 +105,10 @@ class TestChannelEndpoints:
             "device": "Device1",
             "project": "Project1"
         }
-        client.post("/Channel/channels", json=channel_data)
+        client.post("/Channel/channels", json=channel_data, headers=auth_headers())
 
         # Get channels
-        response = client.get("/Channel/channels")
+        response = client.get("/Channel/channels", headers=auth_headers())
         assert response.status_code == 200
         data = response.json()
         assert len(data) == 1
@@ -122,11 +138,11 @@ class TestChannelEndpoints:
 
         # Create multiple channels
         for channel_data in channels_data:
-            response = client.post("/Channel/channels", json=channel_data)
+            response = client.post("/Channel/channels", json=channel_data, headers=auth_headers())
             assert response.status_code == 200
 
         # Get all channels
-        response = client.get("/Channel/channels")
+        response = client.get("/Channel/channels", headers=auth_headers())
         assert response.status_code == 200
         data = response.json()
         assert len(data) == 3
@@ -144,7 +160,7 @@ class TestChannelEndpoints:
             "device": "DeviceID",
             "project": "ProjectID"
         }
-        response = client.post("/Channel/channels", json=channel_data)
+        response = client.post("/Channel/channels", json=channel_data, headers=auth_headers())
         assert response.status_code == 200
         data = response.json()
         assert "id" in data
@@ -159,7 +175,7 @@ class TestChannelEndpoints:
             "device": "IntDevice1",
             "project": "IntProject1"
         }
-        response1 = client.post("/Channel/channels", json=channel1_data)
+        response1 = client.post("/Channel/channels", json=channel1_data, headers=auth_headers())
         channel1_id = response1.json()["id"]
 
         # Create second channel
@@ -168,11 +184,11 @@ class TestChannelEndpoints:
             "device": "IntDevice2",
             "project": "IntProject2"
         }
-        response2 = client.post("/Channel/channels", json=channel2_data)
+        response2 = client.post("/Channel/channels", json=channel2_data, headers=auth_headers())
         channel2_id = response2.json()["id"]
 
         # Get all channels
-        response = client.get("/Channel/channels")
+        response = client.get("/Channel/channels", headers=auth_headers())
         assert response.status_code == 200
         data = response.json()
 
