@@ -15,13 +15,16 @@ on:
 jobs:
 
   # ============================================================
-  # CI - Run tests against PostgreSQL
+  # CI - Run Unit Tests
   # ============================================================
+
   test:
     name: Run Tests
+
     runs-on: ubuntu-latest
 
     services:
+
       postgres:
         image: postgres:15-alpine
 
@@ -30,20 +33,22 @@ jobs:
           POSTGRES_PASSWORD: testpassword
           POSTGRES_DB: testdb
 
+        ports:
+          - 5432:5432
+
         options: >-
           --health-cmd "pg_isready -U testuser -d testdb"
           --health-interval 10s
           --health-timeout 5s
           --health-retries 5
 
-        ports:
-          - 5432:5432
 
     steps:
 
       # --------------------------------------------------------
       # Checkout source code
       # --------------------------------------------------------
+
       - name: Checkout code
         uses: actions/checkout@v4
 
@@ -51,32 +56,67 @@ jobs:
       # --------------------------------------------------------
       # Setup Python
       # --------------------------------------------------------
+
       - name: Set up Python
         uses: actions/setup-python@v5
+
         with:
           python-version: "3.11"
-          cache: "pip"
+          cache: pip
           cache-dependency-path: requirement.txt
 
 
       # --------------------------------------------------------
       # Install dependencies
       # --------------------------------------------------------
+
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
+
           python -m pip install -r requirement.txt
+
           python -m pip install pytest-cov
+
+          # Make sure PostgreSQL driver is available
+          python -m pip install "psycopg[binary]"
+
+
+      # --------------------------------------------------------
+      # Verify PostgreSQL
+      # --------------------------------------------------------
+
+      - name: Verify PostgreSQL
+        env:
+          PGPASSWORD: testpassword
+
+        run: |
+          pg_isready \
+            -h localhost \
+            -p 5432 \
+            -U testuser \
+            -d testdb
 
 
       # --------------------------------------------------------
       # Run tests + coverage
       # --------------------------------------------------------
+
       - name: Run tests with coverage
+
         env:
+          # PostgreSQL used by the application/tests
           DATABASE_URL: postgresql+psycopg://testuser:testpassword@localhost:5432/testdb
 
+          # Test authentication credentials
+          API_BEARER_TOKEN: test-token
+          CLIENT_ID: test-client
+
         run: |
+          echo "=========================================="
+          echo "Running unit tests"
+          echo "=========================================="
+
           python -m pytest test/ \
             -v \
             --tb=short \
@@ -88,9 +128,13 @@ jobs:
       # --------------------------------------------------------
       # Upload coverage report
       # --------------------------------------------------------
+
       - name: Upload coverage report
+
         if: always()
+
         uses: actions/upload-artifact@v4
+
         with:
           name: coverage-report
           path: coverage.xml
@@ -99,19 +143,24 @@ jobs:
   # ============================================================
   # CD - Build Docker Image
   # ============================================================
+
   build:
     name: Build Docker Image
+
     needs: test
+
     runs-on: ubuntu-latest
 
-    # Build only for push events
+    # Docker build only for push events
     if: github.event_name == 'push'
+
 
     steps:
 
       # --------------------------------------------------------
       # Checkout source code
       # --------------------------------------------------------
+
       - name: Checkout code
         uses: actions/checkout@v4
 
@@ -119,76 +168,140 @@ jobs:
       # --------------------------------------------------------
       # Build Docker image
       # --------------------------------------------------------
+
       - name: Build Docker image
+
         run: |
+
+          echo "=========================================="
+          echo "Building Docker image"
+          echo "=========================================="
+
           docker build \
-            -t testwbapp:${{ github.sha }} \
+            --tag testwbapp:${{ github.sha }} \
+            --tag testwbapp:latest \
             .
 
 
       # --------------------------------------------------------
       # Verify Docker image
       # --------------------------------------------------------
+
       - name: Verify Docker image
+
         run: |
+
+          echo "=========================================="
+          echo "Docker image information"
+          echo "=========================================="
+
           docker image ls
+
+          echo "=========================================="
+          echo "Inspecting Docker image"
+          echo "=========================================="
+
           docker inspect testwbapp:${{ github.sha }}
 
 
   # ============================================================
   # CD - Deploy Application to QA
   # ============================================================
+
   deploy_qa:
     name: Deploy to QA
+
     needs: build
+
     runs-on: ubuntu-latest
 
+    # QA deployment only from main
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+
 
     steps:
 
       # --------------------------------------------------------
-      # Trigger QA Render deployment
+      # Trigger Render QA deployment
       # --------------------------------------------------------
+
       - name: Deploy to Render QA
+
         env:
           RENDER_QA_DEPLOY_HOOK: ${{ secrets.RENDER_QA_DEPLOY_HOOK }}
 
         run: |
+
+          echo "=========================================="
+          echo "Starting QA deployment"
+          echo "=========================================="
+
           if [ -z "$RENDER_QA_DEPLOY_HOOK" ]; then
-            echo "RENDER_QA_DEPLOY_HOOK is not configured."
+            echo "ERROR: RENDER_QA_DEPLOY_HOOK is not configured."
             exit 1
           fi
 
-          curl --fail --show-error --silent \
+          curl \
+            --fail \
+            --show-error \
+            --silent \
             --request POST \
             "$RENDER_QA_DEPLOY_HOOK"
 
-          echo "QA deployment triggered."
+          echo "QA deployment triggered successfully."
 
 
       # --------------------------------------------------------
       # Wait for QA application
       # --------------------------------------------------------
+
       - name: Wait for QA application
+
         env:
           API_BEARER_TOKEN: ${{ secrets.API_BEARER_TOKEN }}
           CLIENT_ID: ${{ secrets.CLIENT_ID }}
+
         run: |
 
           QA_URL="https://testwebapp-qa.onrender.com/Channel/channels"
 
-          # The secret may already include the Bearer prefix.
-          # Strip it so the final header is exactly: Authorization: Bearer <token>
+          echo "=========================================="
+          echo "Waiting for QA application"
+          echo "=========================================="
+
+          echo "Health check URL: $QA_URL"
+
+
+          # ------------------------------------------------------
+          # Validate secrets
+          # ------------------------------------------------------
+
+          if [ -z "$API_BEARER_TOKEN" ]; then
+            echo "ERROR: API_BEARER_TOKEN is not configured."
+            exit 1
+          fi
+
+          if [ -z "$CLIENT_ID" ]; then
+            echo "ERROR: CLIENT_ID is not configured."
+            exit 1
+          fi
+
+
+          # ------------------------------------------------------
+          # Remove optional Bearer prefix
+          # ------------------------------------------------------
+
           RAW_TOKEN="${API_BEARER_TOKEN#Bearer }"
           RAW_TOKEN="${RAW_TOKEN#bearer }"
 
-          echo "Waiting for QA application..."
-          echo "Health check URL: $QA_URL"
+
+          # ------------------------------------------------------
+          # Health check
+          # ------------------------------------------------------
 
           for i in {1..30}; do
 
-            echo "Attempt $i/30"
+            echo "Health check attempt $i/30"
 
             HTTP_STATUS=$(curl \
               --silent \
@@ -196,49 +309,79 @@ jobs:
               --write-out "%{http_code}" \
               --max-time 15 \
               -H "Authorization: Bearer $RAW_TOKEN" \
-              -H "client-id: $CLIENT_ID" \
+              -H "X-Client-Id: $CLIENT_ID" \
               "$QA_URL" || true)
+
 
             echo "HTTP Status: $HTTP_STATUS"
 
+
             if [ "$HTTP_STATUS" = "200" ]; then
-              echo "QA application is available."
+
+              echo "=========================================="
+              echo "QA application is available"
+              echo "=========================================="
+
               exit 0
+
             fi
+
+
+            echo "QA application is not ready."
+            echo "Waiting 10 seconds..."
 
             sleep 10
 
           done
 
-          echo "QA application did not become available."
+
+          echo "=========================================="
+          echo "ERROR: QA application did not become ready"
+          echo "=========================================="
+
           exit 1
 
 
   # ============================================================
   # QA - Trigger Automation Repository
   # ============================================================
+
   qa_regression:
     name: Run QA Regression
+
     needs: deploy_qa
+
     runs-on: ubuntu-latest
+
 
     steps:
 
       # --------------------------------------------------------
-      # Trigger TestWebApp-Automation workflow
+      # Trigger QA automation workflow
       # --------------------------------------------------------
+
       - name: Trigger QA Automation
+
         env:
           QA_AUTOMATION_TOKEN: ${{ secrets.QA_AUTOMATION_TOKEN }}
 
         run: |
 
+          echo "=========================================="
+          echo "Triggering QA automation"
+          echo "=========================================="
+
+
           if [ -z "$QA_AUTOMATION_TOKEN" ]; then
-            echo "QA_AUTOMATION_TOKEN is not configured."
+            echo "ERROR: QA_AUTOMATION_TOKEN is not configured."
             exit 1
           fi
 
-          curl --fail --show-error --silent \
+
+          curl \
+            --fail \
+            --show-error \
+            --silent \
             --request POST \
             --url "https://api.github.com/repos/rohitscotchy/TestWebAppAutomation/actions/workflows/qa-regression.yml/dispatches" \
             --header "Accept: application/vnd.github+json" \
@@ -246,26 +389,36 @@ jobs:
             --header "X-GitHub-Api-Version: 2022-11-28" \
             --data '{"ref":"main"}'
 
-          echo "QA automation workflow triggered."
+
+          echo "QA automation workflow triggered successfully."
 
 
       # --------------------------------------------------------
       # Wait for QA automation workflow
       # --------------------------------------------------------
+
       - name: Wait for QA regression
+
         env:
           GH_TOKEN: ${{ secrets.QA_AUTOMATION_TOKEN }}
 
         run: |
 
-          echo "Waiting for QA regression workflow..."
+          echo "=========================================="
+          echo "Waiting for QA regression"
+          echo "=========================================="
 
-          # Give GitHub a few seconds to register the workflow run
-          sleep 5
+
+          # Give GitHub time to register the workflow
+          sleep 10
+
 
           for i in {1..60}; do
 
-            echo "Checking QA regression status... attempt $i/60"
+            echo "------------------------------------------"
+            echo "Checking QA regression - attempt $i/60"
+            echo "------------------------------------------"
+
 
             RUN_INFO=$(gh run list \
               --repo rohitscotchy/TestWebAppAutomation \
@@ -275,76 +428,128 @@ jobs:
               --json databaseId,status,conclusion,createdAt \
               --jq '.[0]')
 
-            echo "$RUN_INFO"
 
             if [ -z "$RUN_INFO" ]; then
+
               echo "QA regression workflow has not appeared yet."
+
               sleep 10
+
               continue
+
             fi
+
+
+            echo "$RUN_INFO"
+
 
             STATUS=$(echo "$RUN_INFO" | jq -r '.status')
             CONCLUSION=$(echo "$RUN_INFO" | jq -r '.conclusion')
 
+
             echo "Status: $STATUS"
             echo "Conclusion: $CONCLUSION"
 
+
+            # ----------------------------------------------------
+            # Workflow completed
+            # ----------------------------------------------------
+
             if [ "$STATUS" = "completed" ]; then
 
-              echo "QA regression completed."
-
               if [ "$CONCLUSION" = "success" ]; then
-                echo "======================================"
+
+                echo "=========================================="
                 echo "       QA REGRESSION PASSED"
-                echo "======================================"
+                echo "=========================================="
+
                 exit 0
+
+              else
+
+                echo "=========================================="
+                echo "       QA REGRESSION FAILED"
+                echo "=========================================="
+
+                exit 1
+
               fi
 
-              echo "======================================"
-              echo "       QA REGRESSION FAILED"
-              echo "======================================"
-              exit 1
             fi
+
+
+            echo "QA regression is still running."
 
             sleep 10
 
           done
 
-          echo "Timeout waiting for QA regression."
+
+          echo "=========================================="
+          echo "ERROR: Timeout waiting for QA regression"
+          echo "=========================================="
+
           exit 1
 
 
   # ============================================================
   # CD - Deploy Production
   # ============================================================
+
   deploy_production:
     name: Deploy to Production
+
     needs: qa_regression
+
     runs-on: ubuntu-latest
 
-    # Production deployment ONLY happens from main
-    # AND only if QA regression succeeds.
+
+    # ----------------------------------------------------------
+    # IMPORTANT:
+    # Production deployment only happens when:
+    #
+    # 1. Event is push
+    # 2. Branch is main
+    # 3. QA regression succeeded
+    # ----------------------------------------------------------
+
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+
 
     steps:
 
       # --------------------------------------------------------
-      # Deploy to production
+      # Deploy to Render Production
       # --------------------------------------------------------
+
       - name: Deploy to Render Production
+
         env:
           RENDER_PROD_DEPLOY_HOOK: ${{ secrets.RENDER_PROD_DEPLOY_HOOK }}
 
         run: |
 
+          echo "=========================================="
+          echo "Starting production deployment"
+          echo "=========================================="
+
+
           if [ -z "$RENDER_PROD_DEPLOY_HOOK" ]; then
-            echo "RENDER_PROD_DEPLOY_HOOK is not configured."
+
+            echo "ERROR: RENDER_PROD_DEPLOY_HOOK is not configured."
+
             exit 1
+
           fi
 
-          curl --fail --show-error --silent \
+
+          curl \
+            --fail \
+            --show-error \
+            --silent \
             --request POST \
             "$RENDER_PROD_DEPLOY_HOOK"
+
 
           echo "Production deployment triggered successfully."
 
@@ -352,9 +557,13 @@ jobs:
       # --------------------------------------------------------
       # Deployment successful
       # --------------------------------------------------------
+
       - name: Deployment successful
+
         if: success()
+
         run: |
+
           echo "=========================================="
           echo " Production deployment successful"
           echo "=========================================="
@@ -363,9 +572,13 @@ jobs:
       # --------------------------------------------------------
       # Deployment failed
       # --------------------------------------------------------
+
       - name: Deployment failed
+
         if: failure()
+
         run: |
+
           echo "=========================================="
           echo " Production deployment failed"
           echo "=========================================="

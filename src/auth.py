@@ -1,9 +1,6 @@
 import os
 
-from dotenv import load_dotenv
 from fastapi import Header, HTTPException, status
-
-load_dotenv()
 
 
 def get_expected_bearer_token() -> str:
@@ -22,24 +19,40 @@ def require_api_auth(
     expected_token = get_expected_bearer_token()
     expected_client_id = get_expected_client_id()
 
-    if not authorization or not authorization.lower().startswith("bearer "):
+    # Validate Authorization header
+    if not authorization:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Missing or invalid Authorization header. Use 'Authorization: Bearer <token>'.",
+            detail="Missing Authorization header.",
         )
 
-    token = authorization.split(" ", 1)[1].strip()
-    if token != expected_token:
+    scheme, _, token = authorization.partition(" ")
+
+    if scheme.lower() != "bearer" or not token.strip():
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid Authorization header. Use 'Bearer <token>'.",
+        )
+
+    if token.strip() != expected_token:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid bearer token.",
         )
 
+    # Support both client-id headers
     provided_client_id = x_client_id or client_id
-    if not provided_client_id or provided_client_id != expected_client_id:
+
+    if not provided_client_id:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Missing or invalid client ID.",
+            detail="Missing client ID.",
+        )
+
+    if provided_client_id != expected_client_id:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid client ID.",
         )
 
     return {

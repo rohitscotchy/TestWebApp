@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends
-from sqlalchemy.orm import Session
 from pydantic import BaseModel
+from sqlalchemy.orm import Session
 
 from src.DBConnection import get_db
 from src.app.models import Channel
@@ -9,7 +9,7 @@ from src.auth import require_api_auth
 
 router = APIRouter(
     prefix="/Channel",
-    tags=["Channel"]
+    tags=["Channel"],
 )
 
 
@@ -28,7 +28,7 @@ def create_channel(
     new_channel = Channel(
         name=channel.name,
         device=channel.device,
-        project=channel.project
+        project=channel.project,
     )
 
     db.add(new_channel)
