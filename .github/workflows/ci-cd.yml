@@ -389,41 +389,60 @@ jobs:
 
 
           # ------------------------------------------------------
-          # Remove Bearer prefix if the secret accidentally
-          # contains it.
+          # Clean Token and Client ID (strip quotes, carriage returns, spaces, Bearer prefix)
           # ------------------------------------------------------
 
-          RAW_TOKEN="${API_BEARER_TOKEN#Bearer }"
+          RAW_TOKEN=$(echo "$API_BEARER_TOKEN" | tr -d '\r' | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' -e 's/^["'\''']//' -e 's/["'\''']$//')
+
+          RAW_TOKEN="${RAW_TOKEN#Bearer }"
 
           RAW_TOKEN="${RAW_TOKEN#bearer }"
 
+          RAW_TOKEN=$(echo "$RAW_TOKEN" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' -e 's/^["'\''']//' -e 's/["'\''']$//')
+
+
+          CLEAN_CLIENT_ID=$(echo "$CLIENT_ID" | tr -d '\r' | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' -e 's/^["'\''']//' -e 's/["'\''']$//')
+
 
           # ------------------------------------------------------
-          # Call protected API
+          # Call protected API with retries
+          # (Allows time for Render container restart & env propagation)
           # ------------------------------------------------------
 
-          HTTP_STATUS=$(curl \
-            --silent \
-            --output /dev/null \
-            --write-out "%{http_code}" \
-            --max-time 15 \
-            -H "Authorization: Bearer $RAW_TOKEN" \
-            -H "X-Client-Id: $CLIENT_ID" \
-            "$QA_API_URL" || true)
+          for i in {1..12}; do
+
+            echo "Authentication check attempt $i/12"
 
 
-          echo "Protected API HTTP Status: $HTTP_STATUS"
+            HTTP_STATUS=$(curl \
+              --silent \
+              --output /dev/null \
+              --write-out "%{http_code}" \
+              --max-time 15 \
+              -H "Authorization: Bearer $RAW_TOKEN" \
+              -H "X-Client-Id: $CLEAN_CLIENT_ID" \
+              "$QA_API_URL" || true)
 
 
-          if [ "$HTTP_STATUS" = "200" ]; then
+            echo "Protected API HTTP Status: $HTTP_STATUS"
 
-            echo "=========================================="
-            echo "QA API authentication successful"
-            echo "=========================================="
 
-            exit 0
+            if [ "$HTTP_STATUS" = "200" ]; then
 
-          fi
+              echo "=========================================="
+              echo "QA API authentication successful"
+              echo "=========================================="
+
+              exit 0
+
+            fi
+
+
+            echo "Attempt $i failed with status $HTTP_STATUS. Waiting 10 seconds..."
+
+            sleep 10
+
+          done
 
 
           echo "=========================================="
@@ -436,11 +455,11 @@ jobs:
             echo "HTTP 401 Unauthorized."
 
             echo "Check the following:"
-            echo "1. API_BEARER_TOKEN in Render QA"
-            echo "2. CLIENT_ID in Render QA"
+            echo "1. API_BEARER_TOKEN in Render QA environment variables"
+            echo "2. CLIENT_ID in Render QA environment variables"
             echo "3. API_BEARER_TOKEN GitHub Secret"
             echo "4. CLIENT_ID GitHub Secret"
-            echo "5. Ensure the values are exactly the same."
+            echo "5. Ensure the values match exactly (without mismatched quotes or trailing spaces)."
 
           fi
 

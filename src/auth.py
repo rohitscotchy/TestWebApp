@@ -4,11 +4,23 @@ from fastapi import Header, HTTPException, status
 
 
 def get_expected_bearer_token() -> str:
-    return os.getenv("API_BEARER_TOKEN", "test-token")
+    token = os.getenv("API_BEARER_TOKEN", "test-token")
+    if not token:
+        return ""
+    # Strip whitespace, newlines, and surrounding quotes
+    token = token.strip().strip("\"'")
+    # Remove leading 'Bearer ' if accidentally included in the environment variable
+    if token.lower().startswith("bearer "):
+        token = token[7:].strip().strip("\"'")
+    return token
 
 
 def get_expected_client_id() -> str:
-    return os.getenv("CLIENT_ID", "test-client")
+    client_id = os.getenv("CLIENT_ID", "test-client")
+    if not client_id:
+        return ""
+    # Strip whitespace, newlines, and surrounding quotes
+    return client_id.strip().strip("\"'")
 
 
 def require_api_auth(
@@ -27,21 +39,22 @@ def require_api_auth(
         )
 
     scheme, _, token = authorization.partition(" ")
+    token = token.strip().strip("\"'")
 
-    if scheme.lower() != "bearer" or not token.strip():
+    if scheme.lower() != "bearer" or not token:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid Authorization header. Use 'Bearer <token>'.",
         )
 
-    if token.strip() != expected_token:
+    if token != expected_token:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid bearer token.",
         )
 
     # Support both client-id headers
-    provided_client_id = x_client_id or client_id
+    provided_client_id = (x_client_id or client_id or "").strip().strip("\"'")
 
     if not provided_client_id:
         raise HTTPException(
@@ -58,4 +71,4 @@ def require_api_auth(
     return {
         "token_valid": True,
         "client_id": provided_client_id,
-    }
+    }
