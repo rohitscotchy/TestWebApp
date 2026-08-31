@@ -46,7 +46,7 @@ jobs:
     steps:
 
       # --------------------------------------------------------
-      # Checkout source code
+      # Checkout
       # --------------------------------------------------------
 
       - name: Checkout code
@@ -71,14 +71,15 @@ jobs:
       # --------------------------------------------------------
 
       - name: Install dependencies
+
         run: |
+
           python -m pip install --upgrade pip
 
           python -m pip install -r requirement.txt
 
           python -m pip install pytest-cov
 
-          # Make sure PostgreSQL driver is available
           python -m pip install "psycopg[binary]"
 
 
@@ -87,10 +88,12 @@ jobs:
       # --------------------------------------------------------
 
       - name: Verify PostgreSQL
+
         env:
           PGPASSWORD: testpassword
 
         run: |
+
           pg_isready \
             -h localhost \
             -p 5432 \
@@ -99,13 +102,14 @@ jobs:
 
 
       # --------------------------------------------------------
-      # Run tests + coverage
+      # Run tests
       # --------------------------------------------------------
 
       - name: Run tests with coverage
 
         env:
-          # PostgreSQL used by the application/tests
+
+          # PostgreSQL test database
           DATABASE_URL: postgresql+psycopg://testuser:testpassword@localhost:5432/testdb
 
           # Test authentication credentials
@@ -113,6 +117,7 @@ jobs:
           CLIENT_ID: test-client
 
         run: |
+
           echo "=========================================="
           echo "Running unit tests"
           echo "=========================================="
@@ -126,7 +131,7 @@ jobs:
 
 
       # --------------------------------------------------------
-      # Upload coverage report
+      # Upload coverage
       # --------------------------------------------------------
 
       - name: Upload coverage report
@@ -151,14 +156,14 @@ jobs:
 
     runs-on: ubuntu-latest
 
-    # Docker build only for push events
+    # Build only for push events
     if: github.event_name == 'push'
 
 
     steps:
 
       # --------------------------------------------------------
-      # Checkout source code
+      # Checkout
       # --------------------------------------------------------
 
       - name: Checkout code
@@ -192,20 +197,20 @@ jobs:
         run: |
 
           echo "=========================================="
-          echo "Docker image information"
+          echo "Docker images"
           echo "=========================================="
 
           docker image ls
 
           echo "=========================================="
-          echo "Inspecting Docker image"
+          echo "Inspect Docker image"
           echo "=========================================="
 
           docker inspect testwbapp:${{ github.sha }}
 
 
   # ============================================================
-  # CD - Deploy Application to QA
+  # CD - Deploy to QA
   # ============================================================
 
   deploy_qa:
@@ -215,7 +220,7 @@ jobs:
 
     runs-on: ubuntu-latest
 
-    # QA deployment only from main
+    # Deploy QA only from main
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
 
 
@@ -236,10 +241,15 @@ jobs:
           echo "Starting QA deployment"
           echo "=========================================="
 
+
           if [ -z "$RENDER_QA_DEPLOY_HOOK" ]; then
+
             echo "ERROR: RENDER_QA_DEPLOY_HOOK is not configured."
+
             exit 1
+
           fi
+
 
           curl \
             --fail \
@@ -248,69 +258,44 @@ jobs:
             --request POST \
             "$RENDER_QA_DEPLOY_HOOK"
 
+
           echo "QA deployment triggered successfully."
 
 
       # --------------------------------------------------------
       # Wait for QA application
+      #
+      # IMPORTANT:
+      # /health is public and does not require authentication.
+      # This prevents 401 from being interpreted as an
+      # application-not-ready condition.
       # --------------------------------------------------------
 
       - name: Wait for QA application
 
-        env:
-          API_BEARER_TOKEN: ${{ secrets.API_BEARER_TOKEN }}
-          CLIENT_ID: ${{ secrets.CLIENT_ID }}
-
         run: |
 
-          QA_URL="https://testwebapp-qa.onrender.com/Channel/channels"
+          QA_HEALTH_URL="https://testwebapp-qa.onrender.com/health"
+
 
           echo "=========================================="
           echo "Waiting for QA application"
           echo "=========================================="
 
-          echo "Health check URL: $QA_URL"
+          echo "Health check URL: $QA_HEALTH_URL"
 
-
-          # ------------------------------------------------------
-          # Validate secrets
-          # ------------------------------------------------------
-
-          if [ -z "$API_BEARER_TOKEN" ]; then
-            echo "ERROR: API_BEARER_TOKEN is not configured."
-            exit 1
-          fi
-
-          if [ -z "$CLIENT_ID" ]; then
-            echo "ERROR: CLIENT_ID is not configured."
-            exit 1
-          fi
-
-
-          # ------------------------------------------------------
-          # Remove optional Bearer prefix
-          # ------------------------------------------------------
-
-          RAW_TOKEN="${API_BEARER_TOKEN#Bearer }"
-          RAW_TOKEN="${RAW_TOKEN#bearer }"
-
-
-          # ------------------------------------------------------
-          # Health check
-          # ------------------------------------------------------
 
           for i in {1..30}; do
 
             echo "Health check attempt $i/30"
+
 
             HTTP_STATUS=$(curl \
               --silent \
               --output /dev/null \
               --write-out "%{http_code}" \
               --max-time 15 \
-              -H "Authorization: Bearer $RAW_TOKEN" \
-              -H "X-Client-Id: $CLIENT_ID" \
-              "$QA_URL" || true)
+              "$QA_HEALTH_URL" || true)
 
 
             echo "HTTP Status: $HTTP_STATUS"
@@ -319,7 +304,7 @@ jobs:
             if [ "$HTTP_STATUS" = "200" ]; then
 
               echo "=========================================="
-              echo "QA application is available"
+              echo "QA application is ready"
               echo "=========================================="
 
               exit 0
@@ -328,6 +313,7 @@ jobs:
 
 
             echo "QA application is not ready."
+
             echo "Waiting 10 seconds..."
 
             sleep 10
@@ -339,11 +325,131 @@ jobs:
           echo "ERROR: QA application did not become ready"
           echo "=========================================="
 
+
+          exit 1
+
+
+      # --------------------------------------------------------
+      # Verify QA API authentication
+      #
+      # This validates that:
+      #
+      # GitHub Secret
+      #        ↓
+      # GitHub Actions
+      #        ↓
+      # Authorization header
+      #        ↓
+      # Render FastAPI
+      #        ↓
+      # API_BEARER_TOKEN / CLIENT_ID
+      #
+      # are correctly configured.
+      # --------------------------------------------------------
+
+      - name: Verify QA API authentication
+
+        env:
+
+          API_BEARER_TOKEN: ${{ secrets.API_BEARER_TOKEN }}
+
+          CLIENT_ID: ${{ secrets.CLIENT_ID }}
+
+
+        run: |
+
+          QA_API_URL="https://testwebapp-qa.onrender.com/Channel/channels"
+
+
+          echo "=========================================="
+          echo "Testing QA API authentication"
+          echo "=========================================="
+
+
+          # ------------------------------------------------------
+          # Validate GitHub Secrets
+          # ------------------------------------------------------
+
+          if [ -z "$API_BEARER_TOKEN" ]; then
+
+            echo "ERROR: API_BEARER_TOKEN is empty."
+
+            exit 1
+
+          fi
+
+
+          if [ -z "$CLIENT_ID" ]; then
+
+            echo "ERROR: CLIENT_ID is empty."
+
+            exit 1
+
+          fi
+
+
+          # ------------------------------------------------------
+          # Remove Bearer prefix if the secret accidentally
+          # contains it.
+          # ------------------------------------------------------
+
+          RAW_TOKEN="${API_BEARER_TOKEN#Bearer }"
+
+          RAW_TOKEN="${RAW_TOKEN#bearer }"
+
+
+          # ------------------------------------------------------
+          # Call protected API
+          # ------------------------------------------------------
+
+          HTTP_STATUS=$(curl \
+            --silent \
+            --output /dev/null \
+            --write-out "%{http_code}" \
+            --max-time 15 \
+            -H "Authorization: Bearer $RAW_TOKEN" \
+            -H "X-Client-Id: $CLIENT_ID" \
+            "$QA_API_URL" || true)
+
+
+          echo "Protected API HTTP Status: $HTTP_STATUS"
+
+
+          if [ "$HTTP_STATUS" = "200" ]; then
+
+            echo "=========================================="
+            echo "QA API authentication successful"
+            echo "=========================================="
+
+            exit 0
+
+          fi
+
+
+          echo "=========================================="
+          echo "ERROR: QA API authentication failed"
+          echo "=========================================="
+
+
+          if [ "$HTTP_STATUS" = "401" ]; then
+
+            echo "HTTP 401 Unauthorized."
+
+            echo "Check the following:"
+            echo "1. API_BEARER_TOKEN in Render QA"
+            echo "2. CLIENT_ID in Render QA"
+            echo "3. API_BEARER_TOKEN GitHub Secret"
+            echo "4. CLIENT_ID GitHub Secret"
+            echo "5. Ensure the values are exactly the same."
+
+          fi
+
+
           exit 1
 
 
   # ============================================================
-  # QA - Trigger Automation Repository
+  # QA - Trigger Playwright Regression
   # ============================================================
 
   qa_regression:
@@ -357,13 +463,15 @@ jobs:
     steps:
 
       # --------------------------------------------------------
-      # Trigger QA automation workflow
+      # Trigger QA Automation Repository
       # --------------------------------------------------------
 
       - name: Trigger QA Automation
 
         env:
+
           QA_AUTOMATION_TOKEN: ${{ secrets.QA_AUTOMATION_TOKEN }}
+
 
         run: |
 
@@ -373,8 +481,11 @@ jobs:
 
 
           if [ -z "$QA_AUTOMATION_TOKEN" ]; then
+
             echo "ERROR: QA_AUTOMATION_TOKEN is not configured."
+
             exit 1
+
           fi
 
 
@@ -394,13 +505,15 @@ jobs:
 
 
       # --------------------------------------------------------
-      # Wait for QA automation workflow
+      # Wait for QA Regression
       # --------------------------------------------------------
 
       - name: Wait for QA regression
 
         env:
+
           GH_TOKEN: ${{ secrets.QA_AUTOMATION_TOKEN }}
+
 
         run: |
 
@@ -409,14 +522,17 @@ jobs:
           echo "=========================================="
 
 
-          # Give GitHub time to register the workflow
+          # Give GitHub time to register the workflow.
+
           sleep 10
 
 
           for i in {1..60}; do
 
             echo "------------------------------------------"
+
             echo "Checking QA regression - attempt $i/60"
+
             echo "------------------------------------------"
 
 
@@ -444,10 +560,12 @@ jobs:
 
 
             STATUS=$(echo "$RUN_INFO" | jq -r '.status')
+
             CONCLUSION=$(echo "$RUN_INFO" | jq -r '.conclusion')
 
 
             echo "Status: $STATUS"
+
             echo "Conclusion: $CONCLUSION"
 
 
@@ -460,16 +578,22 @@ jobs:
               if [ "$CONCLUSION" = "success" ]; then
 
                 echo "=========================================="
+
                 echo "       QA REGRESSION PASSED"
+
                 echo "=========================================="
+
 
                 exit 0
 
               else
 
                 echo "=========================================="
+
                 echo "       QA REGRESSION FAILED"
+
                 echo "=========================================="
+
 
                 exit 1
 
@@ -486,14 +610,17 @@ jobs:
 
 
           echo "=========================================="
+
           echo "ERROR: Timeout waiting for QA regression"
+
           echo "=========================================="
+
 
           exit 1
 
 
   # ============================================================
-  # CD - Deploy Production
+  # CD - Production Deployment
   # ============================================================
 
   deploy_production:
@@ -504,14 +631,12 @@ jobs:
     runs-on: ubuntu-latest
 
 
-    # ----------------------------------------------------------
-    # IMPORTANT:
-    # Production deployment only happens when:
+    # Production deployment only when:
     #
-    # 1. Event is push
-    # 2. Branch is main
+    # 1. Push event
+    # 2. main branch
     # 3. QA regression succeeded
-    # ----------------------------------------------------------
+    #
 
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
 
@@ -519,18 +644,22 @@ jobs:
     steps:
 
       # --------------------------------------------------------
-      # Deploy to Render Production
+      # Deploy Production
       # --------------------------------------------------------
 
       - name: Deploy to Render Production
 
         env:
+
           RENDER_PROD_DEPLOY_HOOK: ${{ secrets.RENDER_PROD_DEPLOY_HOOK }}
+
 
         run: |
 
           echo "=========================================="
+
           echo "Starting production deployment"
+
           echo "=========================================="
 
 
@@ -555,7 +684,7 @@ jobs:
 
 
       # --------------------------------------------------------
-      # Deployment successful
+      # Success
       # --------------------------------------------------------
 
       - name: Deployment successful
@@ -565,12 +694,14 @@ jobs:
         run: |
 
           echo "=========================================="
-          echo " Production deployment successful"
+
+          echo "Production deployment successful"
+
           echo "=========================================="
 
 
       # --------------------------------------------------------
-      # Deployment failed
+      # Failure
       # --------------------------------------------------------
 
       - name: Deployment failed
@@ -580,5 +711,7 @@ jobs:
         run: |
 
           echo "=========================================="
-          echo " Production deployment failed"
+
+          echo "Production deployment failed"
+
           echo "=========================================="

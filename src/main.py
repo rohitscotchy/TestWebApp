@@ -8,11 +8,7 @@ from src.app import Channel
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """
-    Application startup and shutdown lifecycle.
-    """
 
-    # Startup
     try:
         Base.metadata.create_all(bind=engine)
         print("Database tables created successfully.")
@@ -21,7 +17,6 @@ async def lifespan(app: FastAPI):
 
     yield
 
-    # Shutdown
     print("Application shutting down.")
 
 
@@ -33,7 +28,6 @@ app = FastAPI(
 )
 
 
-# Register router
 app.include_router(Channel.router)
 
 
@@ -41,4 +35,11 @@ app.include_router(Channel.router)
 def home():
     return {
         "message": "FastAPI application is running"
+    }
+
+
+@app.get("/health")
+def health():
+    return {
+        "status": "healthy"
     }
