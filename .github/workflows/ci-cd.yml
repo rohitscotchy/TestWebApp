@@ -392,16 +392,16 @@ jobs:
           # Clean Token and Client ID (strip quotes, carriage returns, spaces, Bearer prefix)
           # ------------------------------------------------------
 
-          RAW_TOKEN=$(echo "$API_BEARER_TOKEN" | tr -d '\r' | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' -e 's/^["'\''']//' -e 's/["'\''']$//')
+          RAW_TOKEN=$(echo "$API_BEARER_TOKEN" | tr -d '\r' | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' -e 's/^"//' -e 's/"$//' -e "s/^'//" -e "s/'$//")
 
           RAW_TOKEN="${RAW_TOKEN#Bearer }"
 
           RAW_TOKEN="${RAW_TOKEN#bearer }"
 
-          RAW_TOKEN=$(echo "$RAW_TOKEN" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' -e 's/^["'\''']//' -e 's/["'\''']$//')
+          RAW_TOKEN=$(echo "$RAW_TOKEN" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' -e 's/^"//' -e 's/"$//' -e "s/^'//" -e "s/'$//")
 
 
-          CLEAN_CLIENT_ID=$(echo "$CLIENT_ID" | tr -d '\r' | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' -e 's/^["'\''']//' -e 's/["'\''']$//')
+          CLEAN_CLIENT_ID=$(echo "$CLIENT_ID" | tr -d '\r' | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' -e 's/^"//' -e 's/"$//' -e "s/^'//" -e "s/'$//")
 
 
           # ------------------------------------------------------
