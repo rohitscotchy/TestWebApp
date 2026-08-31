@@ -178,6 +178,11 @@ jobs:
 
           QA_URL="https://testwebapp-qa.onrender.com/Channel/channels"
 
+          # The secret may already include the Bearer prefix.
+          # Strip it so the final header is exactly: Authorization: Bearer <token>
+          RAW_TOKEN="${API_BEARER_TOKEN#Bearer }"
+          RAW_TOKEN="${RAW_TOKEN#bearer }"
+
           echo "Waiting for QA application..."
           echo "Health check URL: $QA_URL"
 
@@ -190,8 +195,8 @@ jobs:
               --output /dev/null \
               --write-out "%{http_code}" \
               --max-time 15 \
-              -H "Authorization: Bearer $API_BEARER_TOKEN" \
-              -H "X-Client-Id: $CLIENT_ID" \
+              -H "Authorization: Bearer $RAW_TOKEN" \
+              -H "client-id: $CLIENT_ID" \
               "$QA_URL" || true)
 
             echo "HTTP Status: $HTTP_STATUS"
