@@ -191,7 +191,7 @@ jobs:
               --write-out "%{http_code}" \
               --max-time 15 \
               -H "Authorization: Bearer $API_BEARER_TOKEN" \
-              -H "Client-Id: $CLIENT_ID" \
+              -H "X-Client-Id: $CLIENT_ID" \
               "$QA_URL" || true)
 
             echo "HTTP Status: $HTTP_STATUS"
